@@ -10,7 +10,8 @@ from db.models import (
     list_scenarios_for_project, save_scenario, load_scenario_config,
     delete_scenario, get_user_role_for_project,
 )
-from core.model_config import ModelConfig
+from ui.sidebar import config_to_session_state
+from ecommerce.sidebar import ecom_config_to_session_state
 
 if is_supabase_configured():
     require_auth()
@@ -42,28 +43,40 @@ role = get_user_role_for_project(user["id"], project["id"]) if is_supabase_confi
 can_edit = role in ("owner", "editor")
 
 role_colors = {"owner": "green", "editor": "blue", "viewer": "orange"}
+product_type = project.get("product_type", "subscription")
+ptype_label = "E-commerce" if product_type == "ecommerce" else "Subscription"
+
 st.title(f"Scenarios — {project['name']}")
 st.caption(f"Сохраняйте и загружайте конфигурации финансовой модели как сценарии. "
+           f"Тип: **{ptype_label}** | "
            f"Ваша роль: :{role_colors.get(role, 'gray')}[{role.capitalize() if role else 'N/A'}]")
 
 # --- Save current config as scenario (editors/owners only) ---
 if can_edit:
     with st.expander("Save New Scenario", expanded=False):
-        with st.form("save_scenario_form"):
-            sc_name = st.text_input("Scenario Name")
-            sc_notes = st.text_area("Notes (optional)")
-            save_btn = st.form_submit_button("Save Current Config")
-            if save_btn:
-                if sc_name.strip():
-                    config = ModelConfig.from_defaults()
-                    result = save_scenario(user["id"], project["id"], sc_name.strip(), config, sc_notes.strip())
-                    if result:
-                        st.success(f"Scenario '{sc_name.strip()}' saved!")
-                        st.rerun()
+        # Determine which config to save
+        if product_type == "ecommerce":
+            last_config = st.session_state.get("_last_ecom_config")
+        else:
+            last_config = st.session_state.get("_last_config")
+
+        if not last_config:
+            st.warning("No config available yet. Visit the Dashboard first to generate a config, then come back to save it.")
+        else:
+            with st.form("save_scenario_form"):
+                sc_name = st.text_input("Scenario Name")
+                sc_notes = st.text_area("Notes (optional)")
+                save_btn = st.form_submit_button("Save Current Config")
+                if save_btn:
+                    if sc_name.strip():
+                        result = save_scenario(user["id"], project["id"], sc_name.strip(), last_config, sc_notes.strip())
+                        if result:
+                            st.success(f"Scenario '{sc_name.strip()}' saved!")
+                            st.rerun()
+                        else:
+                            st.error("Failed to save scenario.")
                     else:
-                        st.error("Failed to save scenario.")
-                else:
-                    st.warning("Enter a scenario name.")
+                        st.warning("Enter a scenario name.")
 
 # --- List scenarios (all scenarios visible via RLS) ---
 scenarios = list_scenarios_for_project(project["id"])
@@ -82,9 +95,13 @@ else:
             st.caption(f"Created: {sc['created_at'][:10]}")
         with columns[2]:
             if st.button("Load", key=f"load_{sc['id']}"):
-                loaded_config = load_scenario_config(sc["id"])
+                loaded_config = load_scenario_config(sc["id"], product_type)
                 if loaded_config:
-                    st.session_state["loaded_config"] = loaded_config
+                    # Push loaded config into widget keys so sidebar picks it up
+                    if product_type == "ecommerce":
+                        ecom_config_to_session_state(loaded_config)
+                    else:
+                        config_to_session_state(loaded_config)
                     st.success(f"Loaded '{sc['name']}'. Go to Dashboard to use it.")
                 else:
                     st.error("Failed to load scenario config.")

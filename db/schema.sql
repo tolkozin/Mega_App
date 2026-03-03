@@ -15,8 +15,12 @@ CREATE TABLE public.projects (
     user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     description TEXT DEFAULT '',
+    product_type TEXT NOT NULL DEFAULT 'subscription' CHECK (product_type IN ('subscription', 'ecommerce')),
     created_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Migration for existing data:
+-- ALTER TABLE public.projects ADD COLUMN product_type TEXT NOT NULL DEFAULT 'subscription' CHECK (product_type IN ('subscription', 'ecommerce'));
 
 -- scenarios (config stored as JSONB = ModelConfig.to_dict())
 CREATE TABLE public.scenarios (
@@ -53,7 +57,7 @@ BEGIN
 
     -- Auto-create default project
     INSERT INTO public.projects (user_id, name, description)
-    VALUES (NEW.id, 'My First Project', 'Default project created on signup');
+    VALUES (NEW.id, 'Main Project', 'Default project created on signup');
 
     RETURN NEW;
 END;

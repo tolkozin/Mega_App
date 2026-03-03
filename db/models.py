@@ -3,6 +3,7 @@
 import streamlit as st
 from db.client import get_supabase
 from core.model_config import ModelConfig
+from ecommerce.model_config import EcomConfig
 
 
 # ===================== PROJECTS =====================
@@ -16,7 +17,7 @@ def list_projects(user_id: str) -> list[dict]:
     return res.data or []
 
 
-def create_project(user_id: str, name: str, description: str = "") -> dict | None:
+def create_project(user_id: str, name: str, description: str = "", product_type: str = "subscription") -> dict | None:
     """Create a new project. Returns the created project dict."""
     sb = get_supabase()
     if not sb:
@@ -25,6 +26,7 @@ def create_project(user_id: str, name: str, description: str = "") -> dict | Non
         "user_id": user_id,
         "name": name,
         "description": description,
+        "product_type": product_type,
     }).execute()
     return res.data[0] if res.data else None
 
@@ -75,8 +77,10 @@ def list_scenarios_for_project(project_id: str) -> list[dict]:
     return res.data or []
 
 
-def save_scenario(user_id: str, project_id: str, name: str, config: ModelConfig, notes: str = "") -> dict | None:
-    """Save a scenario config as JSONB. Returns the created scenario dict."""
+def save_scenario(user_id: str, project_id: str, name: str, config, notes: str = "") -> dict | None:
+    """Save a scenario config as JSONB. Returns the created scenario dict.
+    Config can be ModelConfig (subscription) or EcomConfig (ecommerce).
+    """
     sb = get_supabase()
     if not sb:
         return None
@@ -90,13 +94,15 @@ def save_scenario(user_id: str, project_id: str, name: str, config: ModelConfig,
     return res.data[0] if res.data else None
 
 
-def load_scenario_config(scenario_id: str) -> ModelConfig | None:
-    """Load a scenario's config from DB. Returns ModelConfig or None."""
+def load_scenario_config(scenario_id: str, product_type: str = "subscription"):
+    """Load a scenario's config from DB. Returns ModelConfig or EcomConfig based on product_type."""
     sb = get_supabase()
     if not sb:
         return None
     res = sb.table("scenarios").select("config").eq("id", scenario_id).single().execute()
     if res.data and res.data.get("config"):
+        if product_type == "ecommerce":
+            return EcomConfig.from_dict(res.data["config"])
         return ModelConfig.from_dict(res.data["config"])
     return None
 
@@ -109,8 +115,8 @@ def delete_scenario(scenario_id: str):
     sb.table("scenarios").delete().eq("id", scenario_id).execute()
 
 
-def update_scenario(scenario_id: str, name: str = None, notes: str = None, config: ModelConfig = None):
-    """Update scenario fields."""
+def update_scenario(scenario_id: str, name: str = None, notes: str = None, config=None):
+    """Update scenario fields. Config can be ModelConfig or EcomConfig."""
     sb = get_supabase()
     if not sb:
         return

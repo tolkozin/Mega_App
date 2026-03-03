@@ -11,6 +11,8 @@ from db.models import (
     lookup_user_by_email, share_project, list_project_shares,
     revoke_share, update_share_role,
 )
+from ui.sidebar import CONFIG_DEFAULTS
+from ecommerce.sidebar import ECOM_CONFIG_DEFAULTS
 
 if is_supabase_configured():
     require_auth()
@@ -38,10 +40,13 @@ with st.expander("Create New Project", expanded=False):
     with st.form("new_project_form"):
         proj_name = st.text_input("Project Name")
         proj_desc = st.text_area("Description (optional)")
+        product_type = st.selectbox("Product Type", ["subscription", "ecommerce"],
+            format_func=lambda x: "Subscription App" if x == "subscription" else "E-commerce",
+            help="Тип продукта определяет финансовую модель: подписочный SaaS или e-commerce.")
         create_btn = st.form_submit_button("Create Project")
         if create_btn:
             if proj_name.strip():
-                result = create_project(user["id"], proj_name.strip(), proj_desc.strip())
+                result = create_project(user["id"], proj_name.strip(), proj_desc.strip(), product_type)
                 if result:
                     st.success(f"Project '{proj_name.strip()}' created!")
                     st.rerun()
@@ -60,13 +65,16 @@ else:
         role = proj.get("_role", "owner")
         owner_name = proj.get("_owner_name")
 
-        # Role badge
+        # Role badge + product type badge
         role_colors = {"owner": "green", "editor": "blue", "viewer": "orange"}
         role_label = role.capitalize()
+        ptype = proj.get("product_type", "subscription")
+        ptype_label = "E-commerce" if ptype == "ecommerce" else "Subscription"
+        ptype_color = "violet" if ptype == "ecommerce" else "blue"
 
         col1, col2, col3 = st.columns([4, 2, 1])
         with col1:
-            st.markdown(f"### {proj['name']}  :{role_colors.get(role, 'gray')}[{role_label}]")
+            st.markdown(f"### {proj['name']}  :{role_colors.get(role, 'gray')}[{role_label}]  :{ptype_color}[{ptype_label}]")
             if owner_name:
                 st.caption(f"Owner: {owner_name}")
             if proj.get("description"):
@@ -85,6 +93,13 @@ else:
 
         # Select as active project
         if st.button(f"Open '{proj['name']}'", key=f"open_{proj['id']}"):
+            # Clear old config keys so stale values don't leak between projects
+            for k in list(CONFIG_DEFAULTS.keys()):
+                st.session_state.pop(k, None)
+            for k in list(ECOM_CONFIG_DEFAULTS.keys()):
+                st.session_state.pop(k, None)
+            st.session_state.pop("_last_config", None)
+            st.session_state.pop("_last_ecom_config", None)
             st.session_state["current_project"] = proj
             st.switch_page("pages/3_Scenarios.py")
 
