@@ -1,4 +1,4 @@
-"""Projects management page."""
+"""Projects management page with sharing support."""
 
 import streamlit as st
 
@@ -6,7 +6,11 @@ st.set_page_config(page_title="Projects — Awesome Dashboard", layout="wide")
 
 from db.client import is_supabase_configured
 from db.auth import get_current_user, require_auth, logout
-from db.models import list_projects, create_project, delete_project
+from db.models import (
+    list_all_user_projects, create_project, delete_project,
+    lookup_user_by_email, share_project, list_project_shares,
+    revoke_share, update_share_role,
+)
 
 if is_supabase_configured():
     require_auth()
@@ -47,31 +51,90 @@ with st.expander("Create New Project", expanded=False):
                 st.warning("Enter a project name.")
 
 # --- List projects ---
-projects = list_projects(user["id"])
+projects = list_all_user_projects(user["id"])
 
 if not projects:
     st.info("No projects yet. Create your first project above.")
 else:
     for proj in projects:
+        role = proj.get("_role", "owner")
+        owner_name = proj.get("_owner_name")
+
+        # Role badge
+        role_colors = {"owner": "green", "editor": "blue", "viewer": "orange"}
+        role_label = role.capitalize()
+
         col1, col2, col3 = st.columns([4, 2, 1])
         with col1:
-            st.markdown(f"### {proj['name']}")
+            st.markdown(f"### {proj['name']}  :{role_colors.get(role, 'gray')}[{role_label}]")
+            if owner_name:
+                st.caption(f"Owner: {owner_name}")
             if proj.get("description"):
                 st.caption(proj["description"])
         with col2:
             st.caption(f"Created: {proj['created_at'][:10]}")
         with col3:
-            if st.button("Delete", key=f"del_{proj['id']}", type="secondary"):
-                delete_project(proj["id"])
-                # Clear current project if it was deleted
-                if st.session_state.get("current_project", {}).get("id") == proj["id"]:
-                    st.session_state.pop("current_project", None)
-                st.success(f"Deleted '{proj['name']}'")
-                st.rerun()
+            # Only owners can delete
+            if role == "owner":
+                if st.button("Delete", key=f"del_{proj['id']}", type="secondary"):
+                    delete_project(proj["id"])
+                    if st.session_state.get("current_project", {}).get("id") == proj["id"]:
+                        st.session_state.pop("current_project", None)
+                    st.success(f"Deleted '{proj['name']}'")
+                    st.rerun()
 
         # Select as active project
         if st.button(f"Open '{proj['name']}'", key=f"open_{proj['id']}"):
             st.session_state["current_project"] = proj
             st.switch_page("pages/3_Scenarios.py")
+
+        # Sharing management (owners only)
+        if role == "owner":
+            with st.expander("Manage Sharing", expanded=False):
+                # Share with a new user
+                with st.form(f"share_form_{proj['id']}"):
+                    share_cols = st.columns([3, 1, 1])
+                    with share_cols[0]:
+                        share_email = st.text_input("User email", key=f"share_email_{proj['id']}")
+                    with share_cols[1]:
+                        share_role = st.selectbox("Role", ["viewer", "editor"], key=f"share_role_{proj['id']}")
+                    with share_cols[2]:
+                        share_btn = st.form_submit_button("Share")
+                    if share_btn and share_email:
+                        target = lookup_user_by_email(share_email.strip())
+                        if not target:
+                            st.error("User not found.")
+                        elif target["id"] == user["id"]:
+                            st.warning("You can't share with yourself.")
+                        else:
+                            result = share_project(proj["id"], user["id"], target["id"], share_role)
+                            if result:
+                                st.success(f"Shared with {share_email.strip()} as {share_role}.")
+                                st.rerun()
+
+                # Current shares
+                shares = list_project_shares(proj["id"])
+                if shares:
+                    st.markdown("**Current shares:**")
+                    for s in shares:
+                        profile = s.get("profiles", {})
+                        s_email = profile.get("email", "?")
+                        s_name = profile.get("display_name", "")
+                        s_label = f"{s_name} ({s_email})" if s_name else s_email
+
+                        sc1, sc2, sc3 = st.columns([3, 1, 1])
+                        with sc1:
+                            st.write(f"{s_label} — **{s['role']}**")
+                        with sc2:
+                            new_role = "editor" if s["role"] == "viewer" else "viewer"
+                            if st.button(f"→ {new_role}", key=f"chrole_{s['id']}"):
+                                update_share_role(s["id"], new_role)
+                                st.rerun()
+                        with sc3:
+                            if st.button("Revoke", key=f"revoke_{s['id']}", type="secondary"):
+                                revoke_share(s["id"])
+                                st.rerun()
+                else:
+                    st.caption("Not shared with anyone.")
 
         st.markdown("---")

@@ -1,4 +1,4 @@
-"""Scenarios management page — CRUD for scenarios within a project."""
+"""Scenarios management page — CRUD for scenarios within a project, role-aware."""
 
 import streamlit as st
 
@@ -6,7 +6,10 @@ st.set_page_config(page_title="Scenarios — Awesome Dashboard", layout="wide")
 
 from db.client import is_supabase_configured
 from db.auth import get_current_user, require_auth, logout
-from db.models import list_scenarios, save_scenario, load_scenario_config, delete_scenario
+from db.models import (
+    list_scenarios_for_project, save_scenario, load_scenario_config,
+    delete_scenario, get_user_role_for_project,
+)
 from core.model_config import ModelConfig
 
 if is_supabase_configured():
@@ -34,43 +37,50 @@ if not project:
     st.page_link("pages/2_Projects.py", label="Go to Projects →")
     st.stop()
 
+# Determine user role
+role = get_user_role_for_project(user["id"], project["id"]) if is_supabase_configured() else "owner"
+can_edit = role in ("owner", "editor")
+
+role_colors = {"owner": "green", "editor": "blue", "viewer": "orange"}
 st.title(f"Scenarios — {project['name']}")
-st.caption("Сохраняйте и загружайте конфигурации финансовой модели как сценарии.")
+st.caption(f"Сохраняйте и загружайте конфигурации финансовой модели как сценарии. "
+           f"Ваша роль: :{role_colors.get(role, 'gray')}[{role.capitalize() if role else 'N/A'}]")
 
-# --- Save current config as scenario ---
-with st.expander("Save New Scenario", expanded=False):
-    with st.form("save_scenario_form"):
-        sc_name = st.text_input("Scenario Name")
-        sc_notes = st.text_area("Notes (optional)")
-        save_btn = st.form_submit_button("Save Current Config")
-        if save_btn:
-            if sc_name.strip():
-                # Build config from defaults (user can also load from sidebar first)
-                config = ModelConfig.from_defaults()
-                result = save_scenario(user["id"], project["id"], sc_name.strip(), config, sc_notes.strip())
-                if result:
-                    st.success(f"Scenario '{sc_name.strip()}' saved!")
-                    st.rerun()
+# --- Save current config as scenario (editors/owners only) ---
+if can_edit:
+    with st.expander("Save New Scenario", expanded=False):
+        with st.form("save_scenario_form"):
+            sc_name = st.text_input("Scenario Name")
+            sc_notes = st.text_area("Notes (optional)")
+            save_btn = st.form_submit_button("Save Current Config")
+            if save_btn:
+                if sc_name.strip():
+                    config = ModelConfig.from_defaults()
+                    result = save_scenario(user["id"], project["id"], sc_name.strip(), config, sc_notes.strip())
+                    if result:
+                        st.success(f"Scenario '{sc_name.strip()}' saved!")
+                        st.rerun()
+                    else:
+                        st.error("Failed to save scenario.")
                 else:
-                    st.error("Failed to save scenario.")
-            else:
-                st.warning("Enter a scenario name.")
+                    st.warning("Enter a scenario name.")
 
-# --- List scenarios ---
-scenarios = list_scenarios(user["id"], project["id"])
+# --- List scenarios (all scenarios visible via RLS) ---
+scenarios = list_scenarios_for_project(project["id"])
 
 if not scenarios:
-    st.info("No scenarios yet. Save your first scenario above.")
+    st.info("No scenarios yet." + (" Save your first scenario above." if can_edit else ""))
 else:
     for sc in scenarios:
-        col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
-        with col1:
+        cols = [3, 2, 1] if not can_edit else [3, 2, 1, 1]
+        columns = st.columns(cols)
+        with columns[0]:
             st.markdown(f"**{sc['name']}**")
             if sc.get("notes"):
                 st.caption(sc["notes"])
-        with col2:
+        with columns[1]:
             st.caption(f"Created: {sc['created_at'][:10]}")
-        with col3:
+        with columns[2]:
             if st.button("Load", key=f"load_{sc['id']}"):
                 loaded_config = load_scenario_config(sc["id"])
                 if loaded_config:
@@ -78,11 +88,12 @@ else:
                     st.success(f"Loaded '{sc['name']}'. Go to Dashboard to use it.")
                 else:
                     st.error("Failed to load scenario config.")
-        with col4:
-            if st.button("Delete", key=f"del_{sc['id']}", type="secondary"):
-                delete_scenario(sc["id"])
-                st.success(f"Deleted '{sc['name']}'")
-                st.rerun()
+        if can_edit and len(columns) > 3:
+            with columns[3]:
+                if st.button("Delete", key=f"del_{sc['id']}", type="secondary"):
+                    delete_scenario(sc["id"])
+                    st.success(f"Deleted '{sc['name']}'")
+                    st.rerun()
 
         st.markdown("---")
 

@@ -1,11 +1,11 @@
-"""Login / Registration page."""
+"""Login / Registration / Password Reset page."""
 
 import streamlit as st
 
 st.set_page_config(page_title="Login — Awesome Dashboard", layout="centered")
 
 from db.client import is_supabase_configured
-from db.auth import get_current_user, login_with_email, register_with_email
+from db.auth import get_current_user, login_with_email, register_with_email, send_password_reset
 
 # If already logged in, go to dashboard
 if get_current_user():
@@ -20,7 +20,7 @@ if not is_supabase_configured():
 st.title("Awesome Dashboard")
 st.markdown("Financial model for subscription apps")
 
-tab_login, tab_register = st.tabs(["Login", "Register"])
+tab_login, tab_register, tab_reset = st.tabs(["Login", "Register", "Reset Password"])
 
 with tab_login:
     with st.form("login_form"):
@@ -52,6 +52,19 @@ with tab_register:
                 st.error("Password must be at least 6 characters.")
             else:
                 user = register_with_email(reg_email, reg_password, reg_name)
-                if user:
+                if user and user.get("needs_verification"):
+                    st.info("Проверьте почту — мы отправили ссылку для подтверждения email.")
+                elif user:
                     st.success("Account created! Redirecting...")
                     st.switch_page("pages/1_Dashboard.py")
+
+with tab_reset:
+    with st.form("reset_form"):
+        reset_email = st.text_input("Email", key="reset_email")
+        reset_submitted = st.form_submit_button("Send Reset Link")
+        if reset_submitted:
+            if reset_email:
+                if send_password_reset(reset_email):
+                    st.success("Ссылка для сброса пароля отправлена на вашу почту.")
+            else:
+                st.warning("Please enter your email.")
