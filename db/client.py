@@ -1,10 +1,11 @@
 """Supabase client singleton."""
 
 import os
+from pathlib import Path
 import streamlit as st
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 _SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 _SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
